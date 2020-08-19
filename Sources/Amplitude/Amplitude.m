@@ -22,7 +22,7 @@
 //
 
 #ifndef AMPLITUDE_DEBUG
-#define AMPLITUDE_DEBUG 0
+#define AMPLITUDE_DEBUG 1
 #endif
 
 #ifndef AMPLITUDE_LOG
@@ -120,10 +120,7 @@ static NSString *const SEQUENCE_NUMBER = @"sequence_number";
     BOOL _useAdvertisingIdForDeviceId;
     BOOL _disableIdfaTracking;
 
-    CLLocation *_lastKnownLocation;
     BOOL _locationListeningEnabled;
-    CLLocationManager *_locationManager;
-    AMPLocationManagerDelegate *_locationManagerDelegate;
 
     AMPTrackingOptions *_inputTrackingOptions;
     AMPTrackingOptions *_appliedTrackingOptions;
@@ -289,15 +286,6 @@ static NSString *const SEQUENCE_NUMBER = @"sequence_number";
 
             [self->_backgroundQueue setSuspended:NO];
         }];
-
-        // CLLocationManager must be created on the main thread
-        dispatch_async(dispatch_get_main_queue(), ^{
-            Class CLLocationManager = NSClassFromString(@"CLLocationManager");
-            self->_locationManager = [[CLLocationManager alloc] init];
-            self->_locationManagerDelegate = [[AMPLocationManagerDelegate alloc] init];
-            SEL setDelegate = NSSelectorFromString(@"setDelegate:");
-            [self->_locationManager performSelector:setDelegate withObject:self->_locationManagerDelegate];
-        });
 
         [self addObservers];
     }
@@ -679,27 +667,6 @@ static NSString *const SEQUENCE_NUMBER = @"sequence_number";
     NSString* vendorID = _deviceInfo.vendorID;
     if ([_appliedTrackingOptions shouldTrackIDFV] && vendorID) {
         [apiProperties setValue:vendorID forKey:@"ios_idfv"];
-    }
-    
-    if ([_appliedTrackingOptions shouldTrackLatLng] && _lastKnownLocation != nil) {
-        @synchronized (_locationManager) {
-            NSMutableDictionary *location = [NSMutableDictionary dictionary];
-
-            // Need to use NSInvocation because coordinate selector returns a C struct
-            SEL coordinateSelector = NSSelectorFromString(@"coordinate");
-            NSMethodSignature *coordinateMethodSignature = [_lastKnownLocation methodSignatureForSelector:coordinateSelector];
-            NSInvocation *coordinateInvocation = [NSInvocation invocationWithMethodSignature:coordinateMethodSignature];
-            [coordinateInvocation setTarget:_lastKnownLocation];
-            [coordinateInvocation setSelector:coordinateSelector];
-            [coordinateInvocation invoke];
-            CLLocationCoordinate2D lastKnownLocationCoordinate;
-            [coordinateInvocation getReturnValue:&lastKnownLocationCoordinate];
-
-            [location setValue:[NSNumber numberWithDouble:lastKnownLocationCoordinate.latitude] forKey:@"lat"];
-            [location setValue:[NSNumber numberWithDouble:lastKnownLocationCoordinate.longitude] forKey:@"lng"];
-
-            [apiProperties setValue:location forKey:@"location"];
-        }
     }
 
     if (self->_apiPropertiesTrackingOptions.count > 0) {
@@ -1435,14 +1402,7 @@ static NSString *const SEQUENCE_NUMBER = @"sequence_number";
 #pragma mark - location methods
 
 - (void)updateLocation {
-    if (_locationListeningEnabled) {
-        CLLocation *location = [_locationManager location];
-        @synchronized (_locationManager) {
-            if (location != nil) {
-                _lastKnownLocation = location;
-            }
-        }
-    }
+
 }
 
 - (void)enableLocationListening {
